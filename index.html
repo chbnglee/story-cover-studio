@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Story Cover Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Image Regeneration</p>
+        <h1>Story Cover Studio</h1>
+      </div>
+      <div class="header-actions">
+        <button class="ghost-button" id="resetCoverButton" type="button">초기화</button>
+        <button class="primary-button" id="downloadAllButton" type="button" disabled>생성본 전체 저장</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="tool-panel cover-panel" aria-labelledby="coverTitle">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Cover & Banner</p>
+            <h2 id="coverTitle">AI 표지 재생성</h2>
+          </div>
+          <label class="file-button">
+            <input id="portraitInput" type="file" accept="image/*" />
+            3:4 표지 업로드
+          </label>
+        </div>
+
+        <div class="notice">
+          각 규격은 Gemini에 별도로 요청합니다. 단순 리사이즈, 크롭, 늘리기, 패딩, 흐린 배경 확장은 프롬프트에서 금지하고, 해당 캔버스에 맞는 새 구도로 재생성합니다.
+        </div>
+
+        <div class="setup-grid">
+          <label class="text-field">
+            Story ID
+            <input id="storyIdInput" type="text" placeholder="예: CS0003" />
+          </label>
+          <label class="text-field">
+            API Key
+            <input id="apiKeyInput" type="password" autocomplete="off" placeholder="Google AI Studio API Key" />
+          </label>
+        </div>
+
+        <div class="status-line" id="generationStatus">3:4 표지를 업로드하세요.</div>
+
+        <div class="format-strip" role="list" aria-label="출력 규격">
+          <article class="format-card active" data-format="wide">
+            <button class="format-select" type="button">
+              <span>16:9 Cover</span>
+              <strong>1920 x 1080</strong>
+            </button>
+            <div class="format-actions">
+              <button class="mini-button generate-format" data-format="wide" type="button" disabled>생성</button>
+              <button class="mini-button download-format" data-format="wide" type="button" disabled>저장</button>
+            </div>
+          </article>
+          <article class="format-card" data-format="bannerLarge">
+            <button class="format-select" type="button">
+              <span>Banner L</span>
+              <strong>1332 x 404</strong>
+            </button>
+            <div class="format-actions">
+              <button class="mini-button generate-format" data-format="bannerLarge" type="button" disabled>생성</button>
+              <button class="mini-button download-format" data-format="bannerLarge" type="button" disabled>저장</button>
+            </div>
+          </article>
+          <article class="format-card" data-format="bannerMedium">
+            <button class="format-select" type="button">
+              <span>Banner M</span>
+              <strong>814 x 262</strong>
+            </button>
+            <div class="format-actions">
+              <button class="mini-button generate-format" data-format="bannerMedium" type="button" disabled>생성</button>
+              <button class="mini-button download-format" data-format="bannerMedium" type="button" disabled>저장</button>
+            </div>
+          </article>
+          <article class="format-card" data-format="bannerSmall">
+            <button class="format-select" type="button">
+              <span>Banner S</span>
+              <strong>560 x 207</strong>
+            </button>
+            <div class="format-actions">
+              <button class="mini-button generate-format" data-format="bannerSmall" type="button" disabled>생성</button>
+              <button class="mini-button download-format" data-format="bannerSmall" type="button" disabled>저장</button>
+            </div>
+          </article>
+        </div>
+
+        <div class="preview-shell" id="previewShell">
+          <canvas id="coverCanvas" width="1920" height="1080"></canvas>
+          <div class="empty-state" id="coverEmpty">
+            <strong>아직 생성된 이미지가 없습니다.</strong>
+            <span>위 규격 카드에서 생성 버튼을 누르세요.</span>
+          </div>
+        </div>
+
+        <div class="source-status" id="sourceStatus">선택된 규격: 16:9 Cover</div>
+
+        <div class="control-grid">
+          <label>
+            크롭 기준
+            <select id="bannerFocusSelect">
+              <option value="center">중앙</option>
+              <option value="top">상단 제목 중심</option>
+              <option value="middleLow">인물 중심</option>
+              <option value="bottom">하단 풍경 중심</option>
+            </select>
+          </label>
+          <label>
+            가로 위치
+            <input id="coverXRange" type="range" min="-35" max="35" value="0" />
+          </label>
+          <label>
+            세로 위치
+            <input id="coverYRange" type="range" min="-35" max="35" value="0" />
+          </label>
+          <label>
+            최종 확대
+            <input id="coverScaleRange" type="range" min="100" max="150" value="100" />
+          </label>
+        </div>
+      </section>
+
+      <section class="tool-panel profile-panel" aria-labelledby="profileTitle">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Character Profile</p>
+            <h2 id="profileTitle">원형 프로필 크롭</h2>
+          </div>
+          <label class="file-button">
+            <input id="profileInput" type="file" accept="image/*" />
+            인물 이미지 업로드
+          </label>
+        </div>
+
+        <div class="crop-shell">
+          <canvas id="profileCanvas" width="520" height="520"></canvas>
+          <div class="empty-state" id="profileEmpty">
+            <strong>인물 이미지를 업로드하세요.</strong>
+            <span>원 안에서 드래그하고 확대 비율을 조정합니다.</span>
+          </div>
+        </div>
+
+        <div class="control-grid profile-controls">
+          <label>
+            확대
+            <input id="profileZoomRange" type="range" min="35" max="260" value="100" />
+          </label>
+          <label>
+            가로 위치
+            <input id="profileXRange" type="range" min="-600" max="600" value="0" />
+          </label>
+          <label>
+            세로 위치
+            <input id="profileYRange" type="range" min="-600" max="600" value="0" />
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button class="ghost-button" id="resetProfileButton" type="button" disabled>크롭 초기화</button>
+          <button class="primary-button" id="downloadProfileButton" type="button" disabled>600 PNG 저장</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
