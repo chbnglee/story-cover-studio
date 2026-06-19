@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "build": "node build-sites.js"
+    "build": "node build-pages.js",
+    "build:sites": "node build-sites.js"
   },
   "devDependencies": {}
 }

@@ -18,6 +18,17 @@
 
 `index.html`을 직접 더블클릭하면 프로필 크롭 같은 브라우저 기능은 보일 수 있지만, Gemini 재생성은 동작하지 않습니다.
 
+## Cloudflare Pages 배포
+
+GitHub 저장소를 Cloudflare Pages에 연결한 뒤 아래 값으로 설정합니다.
+
+- Framework preset: `None`
+- Build command: `npm run build`
+- Build output directory: `public`
+- Root directory: 비워두기
+
+`functions/api/generate.js`가 Gemini 프록시 API를 처리합니다. API Key는 사용자 화면 입력값을 사용하므로 Cloudflare 환경 변수에 저장할 필요가 없습니다.
+
 ## 표지 작업 흐름
 
 1. `3:4 표지 업로드`에 세로 표지를 넣습니다.
