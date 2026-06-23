@@ -5,6 +5,8 @@ const outputFormats = {
   bannerSmall: { label: "Banner S", suffix: "Cover_H_MB_I", width: 560, height: 207 },
 };
 
+const backgroundFormat = { label: "Background", suffix: "Background_L_I", width: 1920, height: 1080 };
+
 const $ = (id) => document.getElementById(id);
 
 const portraitInput = $("portraitInput");
@@ -25,26 +27,35 @@ const formatCards = [...document.querySelectorAll(".format-card")];
 const formatSelectButtons = [...document.querySelectorAll(".format-select")];
 const generateButtons = [...document.querySelectorAll(".generate-format")];
 const downloadButtons = [...document.querySelectorAll(".download-format")];
+const historyNavs = [...document.querySelectorAll(".format-card .history-nav")];
 
 const profileInput = $("profileInput");
 const profileCanvas = $("profileCanvas");
 const profileContext = profileCanvas.getContext("2d");
 const profileEmpty = $("profileEmpty");
+const profileStatus = $("profileStatus");
+const profileStatusText = $("profileStatusText");
 const profileZoomRange = $("profileZoomRange");
 const profileXRange = $("profileXRange");
 const profileYRange = $("profileYRange");
 const resetProfileButton = $("resetProfileButton");
 const downloadProfileButton = $("downloadProfileButton");
+const backgroundInput = $("backgroundInput");
+const backgroundCanvas = $("backgroundCanvas");
+const backgroundEmpty = $("backgroundEmpty");
+const backgroundStatus = $("backgroundStatus");
+const generateBackgroundButton = $("generateBackgroundButton");
+const downloadBackgroundButton = $("downloadBackgroundButton");
+const backgroundHistoryNav = $("backgroundHistoryNav");
 
 let portraitPayload = null;
-let generatedImages = {
-  wide: null,
-  bannerLarge: null,
-  bannerMedium: null,
-  bannerSmall: null,
-};
+let generatedHistory = createEmptyHistory();
+let selectedHistoryIndex = createEmptyHistoryIndex();
 let selectedFormat = "wide";
 let isGenerating = false;
+let backgroundPayload = null;
+let backgroundHistory = [];
+let selectedBackgroundIndex = -1;
 let profileImage = null;
 let profileBaseScale = 1;
 let profileState = {
@@ -82,6 +93,14 @@ function cleanBase64(dataUrl) {
   return String(dataUrl).replace(/^data:[^;]+;base64,/, "");
 }
 
+function createEmptyHistory() {
+  return Object.fromEntries(Object.keys(outputFormats).map((formatKey) => [formatKey, []]));
+}
+
+function createEmptyHistoryIndex() {
+  return Object.fromEntries(Object.keys(outputFormats).map((formatKey) => [formatKey, -1]));
+}
+
 function sanitizeStoryId() {
   const value = storyIdInput.value.trim();
   return (value || "story").replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || "story";
@@ -92,16 +111,38 @@ function clamp(value, min, max) {
 }
 
 function hasGeneratedImage() {
-  return Object.values(generatedImages).some(Boolean);
+  return Object.keys(outputFormats).some((formatKey) => Boolean(currentGeneratedImage(formatKey)));
 }
 
 function selectedOutput() {
   return outputFormats[selectedFormat];
 }
 
-function setStatus(message, isError = false) {
+function currentGeneratedImage(formatKey) {
+  const index = selectedHistoryIndex[formatKey];
+  return index >= 0 ? generatedHistory[formatKey]?.[index] || null : null;
+}
+
+function currentBackgroundImage() {
+  return selectedBackgroundIndex >= 0 ? backgroundHistory[selectedBackgroundIndex] || null : null;
+}
+
+function setStatus(message, isError = false, isLoading = false) {
   generationStatus.textContent = message;
   generationStatus.classList.toggle("error", isError);
+  generationStatus.classList.toggle("loading", isLoading);
+}
+
+function setProfileStatus(message, isError = false, isLoading = false) {
+  profileStatusText.textContent = message;
+  profileStatus.classList.toggle("error", isError);
+  profileStatus.classList.toggle("loading", isLoading);
+}
+
+function setBackgroundStatus(message, isError = false, isLoading = false) {
+  backgroundStatus.textContent = message;
+  backgroundStatus.classList.toggle("error", isError);
+  backgroundStatus.classList.toggle("loading", isLoading);
 }
 
 function updatePreviewShape() {
@@ -127,15 +168,24 @@ function setCoverButtonsEnabled() {
 
   downloadButtons.forEach((button) => {
     const formatKey = button.dataset.format;
-    button.disabled = !generatedImages[formatKey] || isGenerating;
+    button.disabled = !currentGeneratedImage(formatKey) || isGenerating;
   });
 
-  downloadAllButton.disabled = !(hasGeneratedImage() || profileImage) || isGenerating;
+  downloadAllButton.disabled = !(hasGeneratedImage() || profileImage || currentBackgroundImage()) || isGenerating;
+  setBackgroundButtonsEnabled();
+  renderHistoryNavs();
 }
 
 function setProfileButtonsEnabled(enabled) {
   resetProfileButton.disabled = !enabled;
   downloadProfileButton.disabled = !enabled;
+}
+
+function setBackgroundButtonsEnabled() {
+  const canGenerate = Boolean(backgroundPayload) && Boolean(apiKeyInput.value.trim()) && !isLocalFileMode && !isGenerating;
+  generateBackgroundButton.disabled = !canGenerate;
+  downloadBackgroundButton.disabled = !currentBackgroundImage() || isGenerating;
+  renderBackgroundHistoryNav();
 }
 
 function drawImageCover(ctx, image, x, y, width, height, focusX = 0.5, focusY = 0.5) {
@@ -173,7 +223,7 @@ function currentTransform(formatKey) {
 }
 
 function renderFormat(targetCanvas, formatKey) {
-  const image = generatedImages[formatKey];
+  const image = currentGeneratedImage(formatKey);
   if (!image) return false;
 
   const format = outputFormats[formatKey];
@@ -206,14 +256,67 @@ function renderCoverPreview() {
 
 function updateSourceStatus() {
   const format = selectedOutput();
-  const image = generatedImages[selectedFormat];
+  const image = currentGeneratedImage(selectedFormat);
   if (image) {
-    sourceStatus.textContent = `생성본: ${format.label} / 저장 규격 ${format.width} x ${format.height}`;
+    const selectedNumber = selectedHistoryIndex[selectedFormat] + 1;
+    const total = generatedHistory[selectedFormat].length;
+    sourceStatus.textContent = `생성본: ${format.label} 후보 ${selectedNumber}/${total} / 저장 규격 ${format.width} x ${format.height}`;
   } else if (portraitPayload) {
     sourceStatus.textContent = `${format.label}은 아직 생성되지 않았습니다. 카드의 생성 버튼을 누르세요.`;
   } else {
     sourceStatus.textContent = `선택된 규격: ${format.label}`;
   }
+}
+
+function renderHistoryNavs() {
+  historyNavs.forEach((nav) => {
+    const formatKey = nav.dataset.format;
+    nav.replaceChildren();
+
+    generatedHistory[formatKey].forEach((_, index) => {
+      const button = document.createElement("button");
+      button.className = "history-button";
+      button.type = "button";
+      button.textContent = String(index + 1);
+      button.title = `${outputFormats[formatKey].label} 후보 ${index + 1}`;
+      button.classList.toggle("active", selectedHistoryIndex[formatKey] === index);
+      button.disabled = isGenerating;
+      button.addEventListener("click", () => selectGeneratedCandidate(formatKey, index));
+      nav.appendChild(button);
+    });
+  });
+}
+
+function selectGeneratedCandidate(formatKey, index) {
+  selectedHistoryIndex[formatKey] = index;
+  activateFormatButton(formatKey);
+  setCoverButtonsEnabled();
+  renderHistoryNavs();
+}
+
+function renderBackgroundHistoryNav() {
+  backgroundHistoryNav.replaceChildren();
+
+  backgroundHistory.forEach((_, index) => {
+    const button = document.createElement("button");
+    button.className = "history-button";
+    button.type = "button";
+    button.textContent = String(index + 1);
+    button.title = `배경 후보 ${index + 1}`;
+    button.classList.toggle("active", selectedBackgroundIndex === index);
+    button.disabled = isGenerating;
+    button.addEventListener("click", () => selectBackgroundCandidate(index));
+    backgroundHistoryNav.appendChild(button);
+  });
+}
+
+function selectBackgroundCandidate(index) {
+  selectedBackgroundIndex = index;
+  renderBackground();
+  backgroundEmpty.classList.toggle("hidden", Boolean(currentBackgroundImage()));
+  setBackgroundStatus(`배경 후보 ${index + 1}/${backgroundHistory.length}을 선택했습니다.`);
+  setCoverButtonsEnabled();
+  renderBackgroundHistoryNav();
 }
 
 function activateFormatButton(formatKey) {
@@ -222,6 +325,7 @@ function activateFormatButton(formatKey) {
     card.classList.toggle("active", card.dataset.format === formatKey);
   });
   renderCoverPreview();
+  renderHistoryNavs();
 }
 
 async function requestGeneration(formatKey) {
@@ -239,7 +343,7 @@ async function requestGeneration(formatKey) {
   isGenerating = true;
   setCoverButtonsEnabled();
   activateFormatButton(formatKey);
-  setStatus(`Gemini가 ${format.label} 전용 새 구도를 생성 중입니다. 단순 비율 변경은 금지되어 있습니다.`);
+  setStatus(`Gemini가 ${format.label} 전용 새 구도를 생성 중입니다.`, false, true);
 
   try {
     const response = await fetch("/api/generate", {
@@ -259,14 +363,19 @@ async function requestGeneration(formatKey) {
       throw new Error(result.error || "Gemini generation failed.");
     }
 
-    generatedImages[formatKey] = await loadImageFromBase64(result.data, result.mimeType);
+    const generatedImage = await loadImageFromBase64(result.data, result.mimeType);
+    generatedHistory[formatKey].push(generatedImage);
+    selectedHistoryIndex[formatKey] = generatedHistory[formatKey].length - 1;
     setStatus(result.note ? `${format.label} 생성이 완료되었습니다. ${result.note}` : `${format.label} 생성이 완료되었습니다.`);
     renderCoverPreview();
+    renderHistoryNavs();
   } catch (error) {
     const message = error.message || "Gemini generation failed.";
+    const isFetchFailure =
+      message === "Failed to fetch" || message === "NetworkError when attempting to fetch resource.";
     const hint =
-      message === "Failed to fetch"
-        ? "Failed to fetch: run.bat 서버가 실행 중인지, 브라우저 주소가 http://localhost:포트번호 인지 확인하세요."
+      isFetchFailure
+        ? `Failed to fetch: 현재 주소가 ${window.location.href}입니다. http://localhost:5173 에서 열었는지 확인하고, 원본 이미지는 25MB 이하로 다시 시도하세요.`
         : message;
     setStatus(hint, true);
   } finally {
@@ -404,7 +513,7 @@ async function createZip(files) {
 }
 
 function downloadCover(formatKey) {
-  if (!generatedImages[formatKey]) {
+  if (!currentGeneratedImage(formatKey)) {
     setStatus(`${outputFormats[formatKey].label} 생성본이 없습니다. 먼저 생성하세요.`, true);
     return;
   }
@@ -419,13 +528,25 @@ async function collectZipFiles() {
   const files = [];
 
   for (const formatKey of Object.keys(outputFormats)) {
-    if (!generatedImages[formatKey]) continue;
+    if (!currentGeneratedImage(formatKey)) continue;
     const canvas = document.createElement("canvas");
     renderFormat(canvas, formatKey);
     const blob = await canvasToBlob(canvas);
     if (blob) {
       files.push({
         name: `${storyId}_${outputFormats[formatKey].suffix}.png`,
+        blob,
+      });
+    }
+  }
+
+  if (currentBackgroundImage()) {
+    const canvas = document.createElement("canvas");
+    renderBackground(canvas);
+    const blob = await canvasToBlob(canvas);
+    if (blob) {
+      files.push({
+        name: `${storyId}_${backgroundFormat.suffix}.png`,
         blob,
       });
     }
@@ -457,19 +578,102 @@ async function downloadAllZip() {
   setStatus(`ZIP 저장이 완료되었습니다. ${files.length}개 파일을 포함했습니다.`);
 }
 
+function clearBackgroundPreview() {
+  backgroundCanvas.width = backgroundFormat.width;
+  backgroundCanvas.height = backgroundFormat.height;
+  const ctx = backgroundCanvas.getContext("2d");
+  ctx.clearRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
+  backgroundEmpty.classList.remove("hidden");
+}
+
+function renderBackground(targetCanvas = backgroundCanvas) {
+  const image = currentBackgroundImage();
+  if (!image) return false;
+  targetCanvas.width = backgroundFormat.width;
+  targetCanvas.height = backgroundFormat.height;
+  const ctx = targetCanvas.getContext("2d");
+  ctx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+  drawImageCover(ctx, image, 0, 0, targetCanvas.width, targetCanvas.height);
+  return true;
+}
+
+async function requestBackgroundGeneration() {
+  if (isLocalFileMode) {
+    setBackgroundStatus("run.bat로 실행한 화면에서만 Gemini 배경 재추출을 사용할 수 있습니다.", true);
+    return;
+  }
+
+  if (!backgroundPayload) {
+    setBackgroundStatus("먼저 동화 속 장면 이미지를 업로드하세요.", true);
+    return;
+  }
+
+  isGenerating = true;
+  setCoverButtonsEnabled();
+  setBackgroundStatus("Gemini가 캐릭터를 제거하고 16:9 배경을 재추출 중입니다.", false, true);
+
+  try {
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jobType: "background",
+        storyId: storyIdInput.value.trim(),
+        apiKey: apiKeyInput.value.trim(),
+        mimeType: backgroundPayload.mimeType,
+        imageData: backgroundPayload.base64,
+      }),
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || "Background generation failed.");
+    }
+
+    const generatedBackground = await loadImageFromBase64(result.data, result.mimeType);
+    backgroundHistory.push(generatedBackground);
+    selectedBackgroundIndex = backgroundHistory.length - 1;
+    renderBackground();
+    renderBackgroundHistoryNav();
+    backgroundEmpty.classList.add("hidden");
+    setBackgroundStatus(result.note
+      ? `배경 후보 ${backgroundHistory.length} 생성이 완료되었습니다. ${result.note}`
+      : `배경 후보 ${backgroundHistory.length} 생성이 완료되었습니다.`);
+  } catch (error) {
+    const message = error.message || "Background generation failed.";
+    const isFetchFailure =
+      message === "Failed to fetch" || message === "NetworkError when attempting to fetch resource.";
+    setBackgroundStatus(isFetchFailure
+      ? `Failed to fetch: 현재 주소가 ${window.location.href}입니다. http://localhost:5173 에서 열었는지 확인하고, 원본 이미지는 25MB 이하로 다시 시도하세요.`
+      : message, true);
+  } finally {
+    isGenerating = false;
+    setCoverButtonsEnabled();
+  }
+}
+
+function downloadBackground() {
+  if (!currentBackgroundImage()) {
+    setBackgroundStatus("저장할 배경 생성본이 없습니다. 먼저 배경 생성을 누르세요.", true);
+    return;
+  }
+
+  const exportCanvas = document.createElement("canvas");
+  renderBackground(exportCanvas);
+  downloadCanvas(exportCanvas, `${sanitizeStoryId()}_${backgroundFormat.suffix}.png`);
+  setBackgroundStatus("배경 이미지를 저장했습니다.");
+}
+
 function resetCoverControls() {
-  generatedImages = {
-    wide: null,
-    bannerLarge: null,
-    bannerMedium: null,
-    bannerSmall: null,
-  };
+  generatedHistory = createEmptyHistory();
+  selectedHistoryIndex = createEmptyHistoryIndex();
   bannerFocusSelect.value = "center";
   coverScaleRange.value = "100";
   coverXRange.value = "0";
   coverYRange.value = "0";
   setCoverButtonsEnabled();
   renderCoverPreview();
+  renderHistoryNavs();
   setStatus(portraitPayload ? "생성본을 초기화했습니다. 필요한 규격을 다시 생성하세요." : "3:4 표지를 업로드하세요.");
 }
 
@@ -481,20 +685,35 @@ portraitInput.addEventListener("change", async (event) => {
     mimeType: file.type || "image/png",
     base64: cleanBase64(loaded.dataUrl),
   };
-  generatedImages = {
-    wide: null,
-    bannerLarge: null,
-    bannerMedium: null,
-    bannerSmall: null,
-  };
+  generatedHistory = createEmptyHistory();
+  selectedHistoryIndex = createEmptyHistoryIndex();
 
   setCoverButtonsEnabled();
   renderCoverPreview();
+  renderHistoryNavs();
   if (isLocalFileMode) {
     setStatus("표지를 업로드했습니다. Gemini 재생성은 run.bat로 실행한 화면에서만 사용할 수 있습니다.", true);
   } else {
     setStatus("표지를 업로드했습니다. 각 규격 카드의 생성 버튼을 눌러 새 이미지를 만드세요.");
   }
+});
+
+backgroundInput.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const loaded = await loadImageFromFile(file);
+  backgroundPayload = {
+    mimeType: file.type || "image/png",
+    base64: cleanBase64(loaded.dataUrl),
+  };
+  backgroundHistory = [];
+  selectedBackgroundIndex = -1;
+  renderBackgroundHistoryNav();
+  clearBackgroundPreview();
+  setBackgroundStatus(isLocalFileMode
+    ? "장면 이미지를 업로드했습니다. 배경 재추출은 run.bat로 실행한 화면에서만 사용할 수 있습니다."
+    : "장면 이미지를 업로드했습니다. 배경 생성을 누르면 캐릭터를 제거한 16:9 배경을 만듭니다.", isLocalFileMode);
+  setCoverButtonsEnabled();
 });
 
 apiKeyInput.addEventListener("input", setCoverButtonsEnabled);
@@ -518,6 +737,8 @@ downloadButtons.forEach((button) => {
 
 resetCoverButton.addEventListener("click", resetCoverControls);
 downloadAllButton.addEventListener("click", downloadAllZip);
+generateBackgroundButton.addEventListener("click", requestBackgroundGeneration);
+downloadBackgroundButton.addEventListener("click", downloadBackground);
 
 function calculateProfileBaseScale() {
   return Math.max(600 / profileImage.width, 600 / profileImage.height);
@@ -531,6 +752,7 @@ function resetProfileState() {
   profileState.y = (600 - profileImage.height * profileBaseScale) / 2;
   syncProfileControls();
   renderProfile();
+  setProfileStatus("크롭 위치를 초기화했습니다. 원 안에서 위치와 확대를 조정하세요.");
 }
 
 function syncProfileControls() {
@@ -609,12 +831,18 @@ function renderProfileExport() {
 profileInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
-  const loaded = await loadImageFromFile(file);
-  profileImage = loaded.image;
-  profileEmpty.classList.add("hidden");
-  setProfileButtonsEnabled(true);
-  setCoverButtonsEnabled();
-  resetProfileState();
+  setProfileStatus("인물 이미지를 불러오는 중입니다.", false, true);
+  try {
+    const loaded = await loadImageFromFile(file);
+    profileImage = loaded.image;
+    profileEmpty.classList.add("hidden");
+    setProfileButtonsEnabled(true);
+    setCoverButtonsEnabled();
+    resetProfileState();
+    setProfileStatus("인물 이미지를 업로드했습니다. 원 안에서 위치와 확대를 조정하세요.");
+  } catch (error) {
+    setProfileStatus("인물 이미지를 불러오지 못했습니다. 다른 파일로 다시 시도하세요.", true);
+  }
 });
 
 profileZoomRange.addEventListener("input", () => {
@@ -673,13 +901,20 @@ profileCanvas.addEventListener("wheel", (event) => {
 resetProfileButton.addEventListener("click", resetProfileState);
 downloadProfileButton.addEventListener("click", () => {
   const canvas = renderProfileExport();
-  if (canvas) downloadCanvas(canvas, `${sanitizeStoryId()}_Talking_P_I.png`);
+  if (canvas) {
+    downloadCanvas(canvas, `${sanitizeStoryId()}_Talking_P_I.png`);
+    setProfileStatus("프로필 이미지를 저장했습니다.");
+  }
 });
 
 drawChecker(profileContext, profileCanvas.width, profileCanvas.height);
 setCoverButtonsEnabled();
 renderCoverPreview();
+renderHistoryNavs();
+clearBackgroundPreview();
 
 if (isLocalFileMode) {
   setStatus("Gemini 재생성 기능은 run.bat로 실행해야 사용할 수 있습니다.", true);
+  setProfileStatus("프로필 크롭은 사용할 수 있지만, 전체 기능 확인은 run.bat로 실행한 화면에서 진행하세요.");
+  setBackgroundStatus("Gemini 배경 재추출 기능은 run.bat로 실행해야 사용할 수 있습니다.", true);
 }

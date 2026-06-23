@@ -35,6 +35,14 @@ const targetSpecs = {
     composition:
       "a compact wide banner with the clearest possible title and a simplified but faithful arrangement of the same characters and key props",
   },
+  background: {
+    name: "clean story background plate",
+    width: 1920,
+    height: 1080,
+    ratio: "16:9",
+    composition:
+      "a clean 16:9 background-only illustration matching the uploaded scene's camera angle, environment, lighting, color palette, and visual style",
+  },
 };
 
 function cleanBase64(dataUrlOrBase64) {
@@ -44,6 +52,23 @@ function cleanBase64(dataUrlOrBase64) {
 function imagePrompt({ jobType, storyId }) {
   const spec = targetSpecs[jobType] || targetSpecs.wide;
   const id = storyId?.trim() || "the story id";
+
+  if (jobType === "background") {
+    return [
+      "Use the uploaded story scene image as the visual reference.",
+      `Story ID for filename only: ${id}. Do not render this Story ID anywhere in the image.`,
+      `Create a new ${spec.name} composed specifically for ${spec.width}x${spec.height}px.`,
+      `Target aspect ratio: ${spec.ratio}.`,
+      spec.composition,
+      "Remove all characters, people, animals, mascots, body parts, faces, and character-held foreground props.",
+      "Reconstruct and repaint the background areas that were hidden behind the removed characters so the scene looks complete and naturally illustrated.",
+      "Preserve the same setting, architecture, plants, furniture, ground, sky, atmosphere, lighting direction, lens perspective, and illustration style from the reference.",
+      "Do not stretch, squeeze, warp, crop, zoom, pad, letterbox, pillarbox, blur-extend, or place the original image inside a new canvas.",
+      "Do not add any title, text, captions, logos, labels, watermarks, UI, or new characters.",
+      "The final image must look like an original clean background plate for animation or storybook production.",
+    ].join("\n");
+  }
+
   const sharedRules = [
     "Use the uploaded 3:4 portrait book cover as the visual reference.",
     `Story ID for filename only: ${id}. Do not render this Story ID anywhere in the image.`,

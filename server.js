@@ -10,6 +10,7 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-image";
 const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || "v1beta";
 const USE_RESPONSE_FORMAT = process.env.GEMINI_USE_RESPONSE_FORMAT === "1";
 const ROOT = __dirname;
+const MAX_REQUEST_BYTES = 40 * 1024 * 1024;
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${GEMINI_MODEL}:generateContent`;
 
 const mimeTypes = {
@@ -57,6 +58,14 @@ const targetSpecs = {
     composition:
       "a compact wide banner with the clearest possible title and a simplified but faithful arrangement of the same characters and key props",
   },
+  background: {
+    name: "clean story background plate",
+    width: 1920,
+    height: 1080,
+    ratio: "16:9",
+    composition:
+      "a clean 16:9 background-only illustration matching the uploaded scene's camera angle, environment, lighting, color palette, and visual style",
+  },
 };
 
 function sendJson(response, statusCode, payload) {
@@ -70,14 +79,21 @@ function sendJson(response, statusCode, payload) {
 function readBody(request) {
   return new Promise((resolve, reject) => {
     let body = "";
+    let didReject = false;
     request.on("data", (chunk) => {
+      if (didReject) return;
       body += chunk;
-      if (body.length > 40 * 1024 * 1024) {
-        reject(new Error("The request image is too large. Please use a file under 40MB."));
-        request.destroy();
+      if (body.length > MAX_REQUEST_BYTES) {
+        didReject = true;
+        const error = new Error("The request image is too large. Please use an image file under 25MB.");
+        error.statusCode = 413;
+        reject(error);
+        request.resume();
       }
     });
-    request.on("end", () => resolve(body));
+    request.on("end", () => {
+      if (!didReject) resolve(body);
+    });
     request.on("error", reject);
   });
 }
@@ -89,6 +105,23 @@ function cleanBase64(dataUrlOrBase64) {
 function imagePrompt({ jobType, storyId }) {
   const spec = targetSpecs[jobType] || targetSpecs.wide;
   const id = storyId?.trim() || "the story id";
+
+  if (jobType === "background") {
+    return [
+      "Use the uploaded story scene image as the visual reference.",
+      `Story ID for filename only: ${id}. Do not render this Story ID anywhere in the image.`,
+      `Create a new ${spec.name} composed specifically for ${spec.width}x${spec.height}px.`,
+      `Target aspect ratio: ${spec.ratio}.`,
+      spec.composition,
+      "Remove all characters, people, animals, mascots, body parts, faces, and character-held foreground props.",
+      "Reconstruct and repaint the background areas that were hidden behind the removed characters so the scene looks complete and naturally illustrated.",
+      "Preserve the same setting, architecture, plants, furniture, ground, sky, atmosphere, lighting direction, lens perspective, and illustration style from the reference.",
+      "Do not stretch, squeeze, warp, crop, zoom, pad, letterbox, pillarbox, blur-extend, or place the original image inside a new canvas.",
+      "Do not add any title, text, captions, logos, labels, watermarks, UI, or new characters.",
+      "The final image must look like an original clean background plate for animation or storybook production.",
+    ].join("\n");
+  }
+
   const sharedRules = [
     "Use the uploaded 3:4 portrait book cover as the visual reference.",
     `Story ID for filename only: ${id}. Do not render this Story ID anywhere in the image.`,
@@ -270,7 +303,9 @@ const server = http.createServer(async (request, response) => {
       const result = await callGemini(payload);
       sendJson(response, 200, result);
     } catch (error) {
-      sendJson(response, 500, { error: error.message || "Image generation failed." });
+      const statusCode = error.statusCode || 500;
+      console.error(`[api/generate] ${statusCode}: ${error.message || "Image generation failed."}`);
+      sendJson(response, statusCode, { error: error.message || "Image generation failed." });
     }
     return;
   }
@@ -298,7 +333,8 @@ function openBrowser(url) {
 }
 
 function startServer(port) {
-  server.once("error", (error) => {
+  const onError = (error) => {
+    server.off("listening", onListening);
     if (error.code === "EADDRINUSE" && port < MAX_PORT) {
       console.log(`Port ${port} is already in use. Trying ${port + 1}...`);
       startServer(port + 1);
@@ -307,18 +343,23 @@ function startServer(port) {
 
     console.error(error);
     process.exit(1);
-  });
+  };
 
-  server.listen(port, () => {
+  const onListening = () => {
+    server.off("error", onError);
     const actualPort = server.address().port;
     const url = `http://localhost:${actualPort}`;
     console.log(`Story Cover Studio: ${url}`);
     console.log(`Gemini model: ${GEMINI_MODEL} (${GEMINI_API_VERSION})`);
     if (!GEMINI_API_KEY) {
-      console.log("GEMINI_API_KEY is not set. Gemini generation will fail until it is configured.");
+      console.log("Enter your Gemini API key in the app screen before generating images.");
     }
     openBrowser(url);
-  });
+  };
+
+  server.once("error", onError);
+  server.once("listening", onListening);
+  server.listen(port);
 }
 
 startServer(START_PORT);

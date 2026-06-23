@@ -83,7 +83,8 @@ button:disabled {
 .header-actions,
 .button-row,
 .panel-head,
-.format-actions {
+.format-actions,
+.history-nav {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -92,6 +93,10 @@ button:disabled {
 .header-actions,
 .button-row {
   flex-wrap: wrap;
+}
+
+.profile-panel .button-row {
+  margin-top: 12px;
 }
 
 .panel-head {
@@ -199,6 +204,36 @@ button:disabled {
   margin-top: 10px;
 }
 
+.status-line.loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.status-line.loading:not(.profile-status)::before,
+.profile-status.loading .status-spinner {
+  content: "";
+  display: inline-block;
+  inline-size: 14px;
+  block-size: 14px;
+  flex: 0 0 auto;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: spin 760ms linear infinite;
+}
+
+.profile-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-spinner {
+  display: none;
+}
+
 .status-line.error {
   border-color: var(--danger-line);
   background: var(--danger-bg);
@@ -207,7 +242,7 @@ button:disabled {
 
 .setup-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) minmax(280px, 1.1fr);
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1fr);
   gap: 10px;
   margin-top: 14px;
 }
@@ -234,6 +269,41 @@ button:disabled {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+.history-nav {
+  min-height: 28px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.history-nav:empty {
+  display: none;
+}
+
+.background-history-nav {
+  margin-left: 2px;
+}
+
+.history-button {
+  inline-size: 28px;
+  block-size: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.history-button.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.history-button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
 .format-select {
   display: grid;
   width: 100%;
@@ -258,7 +328,8 @@ button:disabled {
 }
 
 .preview-shell,
-.crop-shell {
+.crop-shell,
+.background-shell {
   position: relative;
   display: grid;
   place-items: center;
@@ -273,8 +344,13 @@ button:disabled {
   transition: aspect-ratio 180ms ease;
 }
 
+.background-shell {
+  aspect-ratio: 16 / 9;
+  margin: 14px 0 12px;
+}
+
 .crop-shell {
-  width: min(100%, 560px);
+  width: min(86%, 430px);
   aspect-ratio: 1;
   margin: 18px auto 0;
   background:
@@ -297,6 +373,11 @@ canvas {
 }
 
 #coverCanvas {
+  width: 100%;
+  height: 100%;
+}
+
+#backgroundCanvas {
   width: 100%;
   height: 100%;
 }
@@ -339,6 +420,16 @@ canvas {
   grid-template-columns: 1fr;
 }
 
+.panel-divider {
+  height: 1px;
+  margin: 20px 0 18px;
+  background: var(--line);
+}
+
+.compact-head {
+  align-items: center;
+}
+
 label {
   min-width: 0;
   color: var(--muted);
@@ -348,13 +439,15 @@ label {
 
 select,
 input[type="text"],
+input[type="password"],
 input[type="range"] {
   width: 100%;
   margin-top: 8px;
 }
 
 select,
-input[type="text"] {
+input[type="text"],
+input[type="password"] {
   min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -365,6 +458,12 @@ input[type="text"] {
 
 input[type="range"] {
   accent-color: var(--accent);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 1180px) {
@@ -405,6 +504,10 @@ input[type="range"] {
   .panel-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .crop-shell {
+    width: min(100%, 420px);
   }
 
   .file-button,
