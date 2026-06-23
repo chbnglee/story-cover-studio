@@ -6,6 +6,52 @@ const outputFormats = {
 };
 
 const backgroundFormat = { label: "Background", suffix: "Background_L_I", width: 1920, height: 1080 };
+const GEMINI_MODEL = "gemini-3.1-flash-image";
+const GEMINI_API_VERSION = "v1beta";
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${GEMINI_MODEL}:generateContent`;
+
+const geminiTargetSpecs = {
+  wide: {
+    name: "16:9 horizontal cover",
+    width: 1920,
+    height: 1080,
+    ratio: "16:9",
+    composition:
+      "a purpose-made wide story cover with the title near the top center, generous sky behind the title, and the main characters and props arranged across the middle and lower area",
+  },
+  bannerLarge: {
+    name: "large platform banner",
+    width: 1332,
+    height: 404,
+    ratio: "1332:404, about 3.30:1",
+    composition:
+      "an ultra-wide banner with a readable title in the central safe area and the complete main characters and important props distributed around the center without crowding the top or bottom edges",
+  },
+  bannerMedium: {
+    name: "medium platform banner",
+    width: 814,
+    height: 262,
+    ratio: "814:262, about 3.11:1",
+    composition:
+      "a moderately wide banner with a slightly tighter composition than the large banner, keeping the title large and legible and keeping the same main characters and props visible",
+  },
+  bannerSmall: {
+    name: "small platform banner",
+    width: 560,
+    height: 207,
+    ratio: "560:207, about 2.71:1",
+    composition:
+      "a compact wide banner with the clearest possible title and a simplified but faithful arrangement of the same characters and key props",
+  },
+  background: {
+    name: "clean story background plate",
+    width: 1920,
+    height: 1080,
+    ratio: "16:9",
+    composition:
+      "a clean 16:9 background-only illustration matching the uploaded scene's camera angle, environment, lighting, color palette, and visual style",
+  },
+};
 
 const $ = (id) => document.getElementById(id);
 
@@ -143,6 +189,151 @@ function setBackgroundStatus(message, isError = false, isLoading = false) {
   backgroundStatus.textContent = message;
   backgroundStatus.classList.toggle("error", isError);
   backgroundStatus.classList.toggle("loading", isLoading);
+}
+
+function isLocationUnsupported(message) {
+  return /user location is not supported|location.*not supported/i.test(message || "");
+}
+
+function imagePrompt({ jobType, storyId }) {
+  const spec = geminiTargetSpecs[jobType] || geminiTargetSpecs.wide;
+  const id = storyId?.trim() || "the story id";
+
+  if (jobType === "background") {
+    return [
+      "Use the uploaded story scene image as the visual reference.",
+      `Story ID for filename only: ${id}. Do not render this Story ID anywhere in the image.`,
+      `Create a new ${spec.name} composed specifically for ${spec.width}x${spec.height}px.`,
+      `Target aspect ratio: ${spec.ratio}.`,
+      spec.composition,
+      "Remove all characters, people, animals, mascots, body parts, faces, and character-held foreground props.",
+      "Reconstruct and repaint the background areas that were hidden behind the removed characters so the scene looks complete and naturally illustrated.",
+      "Preserve the same setting, architecture, plants, furniture, ground, sky, atmosphere, lighting direction, lens perspective, and illustration style from the reference.",
+      "Do not stretch, squeeze, warp, crop, zoom, pad, letterbox, pillarbox, blur-extend, or place the original image inside a new canvas.",
+      "Do not add any title, text, captions, logos, labels, watermarks, UI, or new characters.",
+      "The final image must look like an original clean background plate for animation or storybook production.",
+    ].join("\n");
+  }
+
+  const sharedRules = [
+    "Use the uploaded 3:4 portrait book cover as the visual reference.",
+    `Story ID for filename only: ${id}. Do not render this Story ID anywhere in the image.`,
+    "The original cover already contains the story title. Recreate the exact visible title text from the reference cover, in the same title style, without changing the wording.",
+    "ABSOLUTELY FORBIDDEN: do not stretch, squeeze, warp, resize, crop, zoom, pad, letterbox, pillarbox, blur-extend, background-fill, or place the original cover inside a wider canvas.",
+    "ABSOLUTELY FORBIDDEN: do not make a ratio-converted version of the uploaded cover or any previous generated image.",
+    "You must create a fully regenerated illustration composed natively for the requested target canvas.",
+    "Preserve the exact story identity: same main characters, same character count, same species, same costumes, same important props, same environment, same visual style, same color palette, and same mood.",
+    "You may adjust character placement, spacing, and scale to fit the target banner, but do not replace, redesign, omit, or add important characters or props.",
+    "Extend and repaint the scene naturally with newly generated scenery so it looks originally illustrated for this target size.",
+    "Keep faces, heads, hands, limbs, animals, and important props complete and away from the crop edges.",
+    "No extra logos, labels, watermarks, captions, subtitles, UI, or decorative text.",
+    "Leave a safe margin around all title letters so no word touches the top, bottom, left, or right edge.",
+  ];
+
+  if (jobType !== "wide") {
+    return [
+      ...sharedRules,
+      `Create a new ${spec.name} composed specifically for ${spec.width}x${spec.height}px.`,
+      `Target aspect ratio: ${spec.ratio}.`,
+      spec.composition,
+      "This is a separate native regeneration for this exact banner size, not a crop or resize from another banner.",
+      "Use the available vertical space carefully: title must remain readable, and characters must not be squeezed or cut off.",
+      "Prefer a clean readable title area over decorative clutter.",
+    ].join("\n");
+  }
+
+  return [
+    ...sharedRules,
+    `Create a new ${spec.name} composed specifically for ${spec.width}x${spec.height}px.`,
+    `Target aspect ratio: ${spec.ratio}.`,
+    spec.composition,
+  ].join("\n");
+}
+
+function buildGeminiPayload(payload) {
+  return {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: imagePrompt(payload) },
+          {
+            inline_data: {
+              mime_type: payload.mimeType,
+              data: cleanBase64(payload.imageData),
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function parseGeminiResult(data) {
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  const imagePart = parts.find((part) => part.inlineData || part.inline_data);
+  const textPart = parts.find((part) => part.text);
+  const inlineData = imagePart?.inlineData || imagePart?.inline_data;
+
+  if (!inlineData?.data) {
+    throw new Error(textPart?.text || "Gemini returned no image. Try again with a slightly different prompt.");
+  }
+
+  return {
+    mimeType: inlineData.mimeType || inlineData.mime_type || "image/png",
+    data: inlineData.data,
+    note: textPart?.text || "",
+  };
+}
+
+async function requestGeminiDirect(payload) {
+  const apiResponse = await fetch(GEMINI_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": payload.apiKey,
+    },
+    body: JSON.stringify(buildGeminiPayload(payload)),
+  });
+
+  const text = await apiResponse.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!apiResponse.ok) {
+    throw new Error(data?.error?.message || `Gemini API error: ${apiResponse.status}`);
+  }
+
+  return parseGeminiResult(data);
+}
+
+async function requestGeminiImage(payload) {
+  const response = await fetch("/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    result = {};
+  }
+
+  if (!response.ok) {
+    const message = result.error || "Gemini generation failed.";
+    if (isLocationUnsupported(message)) {
+      return requestGeminiDirect(payload);
+    }
+    throw new Error(message);
+  }
+
+  return result;
 }
 
 function updatePreviewShape() {
@@ -346,22 +537,13 @@ async function requestGeneration(formatKey) {
   setStatus(`Gemini가 ${format.label} 전용 새 구도를 생성 중입니다.`, false, true);
 
   try {
-    const response = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jobType: formatKey,
-        storyId: storyIdInput.value.trim(),
-        apiKey: apiKeyInput.value.trim(),
-        mimeType: portraitPayload.mimeType,
-        imageData: portraitPayload.base64,
-      }),
+    const result = await requestGeminiImage({
+      jobType: formatKey,
+      storyId: storyIdInput.value.trim(),
+      apiKey: apiKeyInput.value.trim(),
+      mimeType: portraitPayload.mimeType,
+      imageData: portraitPayload.base64,
     });
-
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(result.error || "Gemini generation failed.");
-    }
 
     const generatedImage = await loadImageFromBase64(result.data, result.mimeType);
     generatedHistory[formatKey].push(generatedImage);
@@ -375,7 +557,7 @@ async function requestGeneration(formatKey) {
       message === "Failed to fetch" || message === "NetworkError when attempting to fetch resource.";
     const hint =
       isFetchFailure
-        ? `Failed to fetch: 현재 주소가 ${window.location.href}입니다. http://localhost:5173 에서 열었는지 확인하고, 원본 이미지는 25MB 이하로 다시 시도하세요.`
+        ? `Failed to fetch: 현재 주소가 ${window.location.href}입니다. 페이지를 새로고침하고 API Key와 네트워크 연결을 확인하세요. 로컬 실행 중이라면 http://localhost:포트번호 주소에서 열어야 합니다.`
         : message;
     setStatus(hint, true);
   } finally {
@@ -613,22 +795,13 @@ async function requestBackgroundGeneration() {
   setBackgroundStatus("Gemini가 캐릭터를 제거하고 16:9 배경을 재추출 중입니다.", false, true);
 
   try {
-    const response = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jobType: "background",
-        storyId: storyIdInput.value.trim(),
-        apiKey: apiKeyInput.value.trim(),
-        mimeType: backgroundPayload.mimeType,
-        imageData: backgroundPayload.base64,
-      }),
+    const result = await requestGeminiImage({
+      jobType: "background",
+      storyId: storyIdInput.value.trim(),
+      apiKey: apiKeyInput.value.trim(),
+      mimeType: backgroundPayload.mimeType,
+      imageData: backgroundPayload.base64,
     });
-
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(result.error || "Background generation failed.");
-    }
 
     const generatedBackground = await loadImageFromBase64(result.data, result.mimeType);
     backgroundHistory.push(generatedBackground);
@@ -644,7 +817,7 @@ async function requestBackgroundGeneration() {
     const isFetchFailure =
       message === "Failed to fetch" || message === "NetworkError when attempting to fetch resource.";
     setBackgroundStatus(isFetchFailure
-      ? `Failed to fetch: 현재 주소가 ${window.location.href}입니다. http://localhost:5173 에서 열었는지 확인하고, 원본 이미지는 25MB 이하로 다시 시도하세요.`
+      ? `Failed to fetch: 현재 주소가 ${window.location.href}입니다. 페이지를 새로고침하고 API Key와 네트워크 연결을 확인하세요. 로컬 실행 중이라면 http://localhost:포트번호 주소에서 열어야 합니다.`
       : message, true);
   } finally {
     isGenerating = false;
