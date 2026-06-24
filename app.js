@@ -5,7 +5,7 @@ const outputFormats = {
   bannerSmall: { label: "Banner S", suffix: "Cover_H_MB_I", width: 560, height: 207 },
 };
 
-const backgroundFormat = { label: "Background", suffix: "Background_L_I", width: 1920, height: 1080 };
+const backgroundFormat = { label: "Background", suffix: "Talking_BG_I", width: 1920, height: 1080 };
 const GEMINI_MODEL = "gemini-3.1-flash-image";
 const GEMINI_API_VERSION = "v1beta";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${GEMINI_MODEL}:generateContent`;
